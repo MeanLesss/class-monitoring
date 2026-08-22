@@ -1,0 +1,19 @@
+{
+  "name": "class-monitor-ai",
+  "base_weights": "models/pretrained/yolo11n.pt",
+  "data": "custom.yaml",
+  "classes": {
+    "0": "person"
+  },
+  "epochs": 40,
+  "imgsz": 640,
+  "metrics": {
+    "metrics/precision(B)": 0.9913121962738561,
+    "metrics/recall(B)": 1.0,
+    "metrics/mAP50(B)": 0.995,
+    "metrics/mAP50-95(B)": 0.8657324611111112,
+    "fitness": 0.8657324611111112
+  },
+  "run_dir": "D:\\UP School\\AI\\final\\classroom_occupancy\\runs\\detect\\models\\training\\class-monitor-ai4",
+  "conf_floor": 0.18
+}

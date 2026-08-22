@@ -1,0 +1,5 @@
+path: .
+train: dataset/images
+val: dataset/val/images
+names:
+  0: person

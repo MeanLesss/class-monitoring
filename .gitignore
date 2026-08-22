@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+# Virtual environment
+ai-venv/
+venv/
+.env
+
+# Notebook / training run artifacts
+runs/
+models/training/
+
+# Weights (regenerable: pretrained download automatically, tuned is trained)
+*.pt
+!models/tuned/*.meta.json
+
+# Annotated previews / caches (regenerable from the app)
+dataset/outputs/
+dataset/*.cache
+dataset/**/labels.cache
+
+# Video uploads (too large for git)
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

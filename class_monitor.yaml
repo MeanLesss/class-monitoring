@@ -1,0 +1,7 @@
+# class-monitor-ai dataset: labeled classroom frames (class 0 = person)
+path: D:/UP School/AI/final/classroom_occupancy/dataset
+train: images
+val: val/images
+
+names:
+  0: person

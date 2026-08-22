@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./lib.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; width: 100%; box-sizing: border-box; background: #0e1117; }
+  #toolbar { font: 13px sans-serif; padding: 4px 0 8px 0; color: #ccc; }
+  #toolbar button {
+    margin-right: 6px; cursor: pointer; background: #262730; color: #eee;
+    border: 1px solid #555; border-radius: 4px; padding: 3px 10px;
+  }
+  #toolbar button.active { background: #4b8dff; color: #fff; }
+  #wrap { position: relative; width: 100%; max-width: 100%; }
+  canvas {
+    display: block; width: 100%; height: auto; max-width: 100%;
+    cursor: crosshair; touch-action: none;
+  }
+  .hint { font: 12px sans-serif; color: #888; margin-top: 4px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <button id="mode-draw" class="active">✏️ Draw</button>
+  <button id="mode-select">↔️ Select / Move</button>
+  <button id="del">🗑 Delete selected</button>
+  <button id="clear">Clear all</button>
+</div>
+<div id="wrap"><canvas id="cv"></canvas></div>
+<div class="hint" id="hint">Draw: drag to make a box. Select: click a box, drag to move, or drag a corner to resize.</div>
+<script src="./main.js"></script>
+</body>
+</html>

@@ -1,9 +1,16 @@
+# Classroom Occupancy - dependencies.
+#
+# This file is used BOTH locally and by Streamlit Community Cloud (the cloud
+# REQUIRES it to be named exactly requirements.txt at the repo root).
+#
+# For the free cloud tier (CPU-only, ~1GB RAM) we use opencv-headless and let
+# ultralytics pull a CPU build of torch. If you also run the local WebRTC app
+# (app.py, live streaming), install the extras separately:
+#     pip install streamlit-webrtc av
+
 ultralytics>=8.3.0,<8.4
-opencv-python>=4.8.0
+opencv-python-headless>=4.8.0
 numpy>=1.24
 pandas>=2.0
 matplotlib>=3.7
-ipykernel>=6.0
 streamlit>=1.61
-streamlit-webrtc>=0.77.0
-av>=17.0

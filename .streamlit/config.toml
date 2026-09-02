@@ -1,0 +1,10 @@
+[server]
+# In debug mode you can use live-reload locally without restarting.
+headless = true
+runOnSave = true
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#4F8BF9"

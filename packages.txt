@@ -1,6 +1,1 @@
-# System (apt) packages needed on Streamlit Community Cloud.
-# ultralytics pulls opencv-python (non-headless), which needs libGL.so.1.
-# libgl1 provides that library. Kept minimal to avoid apt failure on the
-# Cloud's Debian Bullseye base image (only the package that MUST be present
-# is listed here).
 libgl1

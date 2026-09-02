@@ -92,7 +92,7 @@ def ensure_model(path):
     dest = os.path.join(_CACHE, fname)
     if not os.path.exists(dest):
         url = f"{base}/{fname}"
-        st.toast(f"Downloading {fname} (first run only) ...")
+        print(f"[class-monitor] downloading {fname} ...")
         urllib.request.urlretrieve(url, dest)
     return dest
 
@@ -166,17 +166,26 @@ with st.sidebar:
 
 
 # --------------------------------------------------------------------------
-# Models - loaded EAGERLY in the main thread, cached across reruns.
-# On the cloud, disable CUDA explicitly so YOLO runs on CPU (free tier has no GPU
-# and auto-detection of a missing GPU is fine, but this makes intent explicit).
+# Models - loaded EAGERLY in the main thread. We cache them in a module-level
+# dict guarded by a lock (NOT @st.cache_resource) to avoid Streamlit's
+# cache-replay mechanism, which errors on the cloud when a cached function
+# emits Streamlit elements. Module globals persist across reruns in the same
+# process, which is all we need.
 # --------------------------------------------------------------------------
 _MODEL_CACHE: dict = {}
+_MODEL_LOCK = __import__("threading").Lock()
 
 
-@st.cache_resource(show_spinner="Loading YOLO models (may download on first run)...")
 def _load_models(person_path, chair_path):
-    person = YOLO(ensure_model(person_path))
-    chair = YOLO(ensure_model(chair_path))
+    with _MODEL_LOCK:
+        person = _MODEL_CACHE.get(person_path)
+        if person is None:
+            person = YOLO(ensure_model(person_path))
+            _MODEL_CACHE[person_path] = person
+        chair = _MODEL_CACHE.get(chair_path)
+        if chair is None:
+            chair = YOLO(ensure_model(chair_path))
+            _MODEL_CACHE[chair_path] = chair
     return person, chair
 
 

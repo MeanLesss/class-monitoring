@@ -585,9 +585,9 @@ if up is not None:
 # --------------------------------------------------------------------------
 st.divider()
 st.subheader("Test with an uploaded video")
-st.caption("MP4 / MOV / AVI. Every frame runs through the same pipeline "
-           "(seat-prompt objects or the auto chair/desk/MONITOR area -> "
-           "heads inside = occupied). Keep clips short on the free cloud.")
+st.caption("MP4 / MOV / AVI. **Play video** just watches the clip in the browser "
+           "(no detection). **Run detection on video** sends every frame through "
+           "the pipeline. Keep clips short on the free cloud.")
 
 up_vid = st.file_uploader("Upload a classroom video",
                           type=["mp4", "mov", "avi", "m4v"])
@@ -615,9 +615,14 @@ if up_vid is not None:
         st.write(f"**{os.path.basename(up_vid.name)}** - {vw}x{vh}, "
                  f"{total_frames} frames @ {fps:.0f} fps ({dur:.0f}s)")
 
+        play = st.button("&#9654; Play video (no detection - just watch)")
+        if play:
+            up_vid.seek(0)
+            st.video(up_vid.read())
+
         secs = st.number_input("Seconds to process (0 = whole video)", 0, 600, 30,
                                help="Long videos take long to analyze - start with 30 s.")
-        if st.button("Process video"):
+        if st.button("Run detection on video"):
             max_frames = int(fps * secs) if secs else total_frames
             vscale = 1280 / vw if vw > 1280 else 1.0
             ph = st.empty()

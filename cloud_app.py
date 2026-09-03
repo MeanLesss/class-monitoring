@@ -48,6 +48,15 @@ except Exception:  # pragma: no cover - live camera is optional
     camera_input_live = None
     _HAVE_LIVE = False
 
+# PyAV is only used to export an H.264 MP4 of the annotated video so the browser
+# can play/pause/seek it (OpenCV's mp4v output isn't playable in <video>).
+try:
+    import av
+    _HAVE_AV = "libx264" in av.codecs_available
+except Exception:  # pragma: no cover - export is optional
+    av = None
+    _HAVE_AV = False
+
 # --------------------------------------------------------------------------
 # Model paths. On the cloud the pretrained weights are NOT stored in git, so
 # they're downloaded on first run to a local cache dir. ultralytics >= 8.3
@@ -586,8 +595,9 @@ if up is not None:
 st.divider()
 st.subheader("Test with an uploaded video")
 st.caption("MP4 / MOV / AVI. **Play original** just watches the clip in the "
-           "browser (no detection). **Watch with detection** plays it frame-by-frame "
-           "with YOLO boxes/bounding and live occupied count.")
+           "browser (no detection). **Build annotated video** runs detection once "
+           "to create a playable MP4 you can play / pause / seek with YOLO boxes "
+           "and counts.")
 
 up_vid = st.file_uploader("Upload a classroom video",
                           type=["mp4", "mov", "avi", "m4v"])
@@ -620,44 +630,59 @@ if up_vid is not None:
             up_vid.seek(0)
             st.video(up_vid.read())
 
-        secs = st.number_input("Seconds to watch (0 = whole video)", 0, 600, 30,
-                               help="Longer = more frames through YOLO, so slower.")
-        watch = st.button("&#9654; Watch with detection")
+        secs = st.number_input("Seconds to export (0 = whole video)", 0, 600, 30,
+                               help="Longer = more frames through YOLO, so slower "
+                                    "to build the annotated clip.")
+        watch = st.button("&#9654; Build annotated video (watch with detection)")
 
         if watch:
             max_frames = int(fps * secs) if secs else total_frames
             vscale = 1280 / vw if vw > 1280 else 1.0
+            out_w = int(vw * vscale); out_h = int(vh * vscale)
+            out_w += out_w % 2; out_h += out_h % 2   # H.264 needs even dimensions
             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            st.markdown("**Watching with detection** - press Rerun / Stop to stop.")
-            live_ph = st.empty()
-            c1m, c2m = st.columns(2)
-            live_occ = c1m.empty()
-            bar = st.progress(0.0, text="Playing...")
+            tmp_out = tempfile.NamedTemporaryFile(prefix="occ_annot_",
+                                                  suffix=".mp4", delete=False)
+            tmp_out_name = tmp_out.name
+            tmp_out.close()
+            bar = st.progress(0.0, text="Building annotated video...")
+            st.caption("This runs detection once and saves a playable MP4 - "
+                       "then you can play / pause / seek it below.")
             occs, seat_final, i = [], 0, 0
             results_out = {}
             try:
-                while i < max_frames:
-                    ok, frame = cap.read()
-                    if not ok:
-                        break
-                    if vscale < 1.0:
-                        frame = cv2.resize(frame, (1280, int(vh * vscale)))
-                    annotated, occupied, seat_final = analyze_image(
-                        frame, conf, seats, imgsz, manual_rois=None,
-                        results_out=results_out)
-                    occs.append(occupied)
-                    live_occ.metric("Occupied right now", occupied)
-                    live_ph.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-                                  caption=f"frame {i + 1}/{max_frames} | SEATS {seat_final}"
-                                          f" OCCUPIED {occupied}",
-                                  width="stretch")
-                    bar.progress(min(1.0, (i + 1) / max(1, max_frames)),
-                                 text=f"frame {i + 1}/{max_frames}")
-                    annotated = None
-                    frame = None
-                    if (i + 1) % 25 == 0:
-                        gc.collect()
-                    i += 1
+                if not _HAVE_AV:
+                    raise RuntimeError("PyAV not available - add `av` to requirements.")
+                with av.open(tmp_out_name, mode="w") as container:
+                    stream = container.add_stream("libx264", rate=fps)
+                    stream.width = out_w
+                    stream.height = out_h
+                    stream.pix_fmt = "yuv420p"
+                    stream.options = {"preset": "veryfast", "crf": "23"}
+                    while i < max_frames:
+                        ok, frame = cap.read()
+                        if not ok:
+                            break
+                        if (frame.shape[1], frame.shape[0]) != (out_w, out_h):
+                            frame = cv2.resize(frame, (out_w, out_h))
+                        annotated, occupied, seat_final = analyze_image(
+                            frame, conf, seats, imgsz, manual_rois=None,
+                            results_out=results_out)
+                        occs.append(occupied)
+                        rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+                        vf = av.VideoFrame.from_ndarray(rgb, format="rgb24")
+                        for packet in stream.encode(vf):
+                            container.mux(packet)
+                        annotated = None
+                        rgb = None
+                        frame = None
+                        bar.progress(min(1.0, (i + 1) / max(1, max_frames)),
+                                     text=f"frame {i + 1}/{max_frames}")
+                        if (i + 1) % 25 == 0:
+                            gc.collect()
+                        i += 1
+                    for packet in stream.encode():
+                        container.mux(packet)
             except Exception:
                 traceback.print_exc()
                 st.error("Video analysis failed - see logs for the traceback.")
@@ -665,14 +690,27 @@ if up_vid is not None:
                 cap.release()
 
             bar.progress(1.0, text="Done.")
+            if _HAVE_AV and os.path.exists(tmp_out_name) \
+                    and os.path.getsize(tmp_out_name) > 0:
+                with open(tmp_out_name, "rb") as f:
+                    annotated_bytes = f.read()
+                st.success(f"Annotated video ready ({i} frames) - use the player "
+                           "to play / pause / seek.")
+                st.video(annotated_bytes)
+                annotated_bytes = None
             if occs:
                 st.subheader("Summary")
                 m1, m2, m3, m4 = st.columns(4)
-                m1.metric("Frames watched", len(occs))
+                m1.metric("Frames built", len(occs))
                 m2.metric("Seats", seat_final)
                 m3.metric("Avg occupied", round(sum(occs) / len(occs), 1))
                 m4.metric("Peak occupied", max(occs))
-            os.unlink(tmp_in.name)
+            for _p in (tmp_out_name, tmp_in.name):
+                try:
+                    if os.path.exists(_p):
+                        os.unlink(_p)
+                except Exception:
+                    pass
 
 
 # --------------------------------------------------------------------------

@@ -60,7 +60,8 @@ app uses `camera-input-live` instead.
 ## Tips / limits (free tier)
 
 - Keep uploaded **videos short** (≤ ~30 s) — each frame runs two YOLO models on
-  CPU.
+  CPU. "Build annotated video" runs detection once and saves a playable H.264
+  MP4 you can play / pause / seek (uses PyAV; needs `av` in requirements.txt).
 - The default person model is `yolo11n-pose` (small, fast). On uploads you can
   switch models in the sidebar (including your trained `class-monitor-ai`).
 - The **live camera** runs YOLO on every frame, so it updates at a low FPS on

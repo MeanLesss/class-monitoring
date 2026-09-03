@@ -28,3 +28,7 @@ streamlit>=1.61
 # webcam as frames WITHOUT WebRTC, so it needs no TURN relay and works on the
 # free Streamlit Cloud. The app has a guarded fallback if this is missing.
 streamlit-camera-input-live>=0.2.0
+
+# PyAV is used only to export an H.264 MP4 of the annotated video (OpenCV's
+# mp4v output is not playable in the browser <video>). Optional for the app.
+av>=11.0.0

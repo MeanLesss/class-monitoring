@@ -1,13 +1,13 @@
 # Deploy to Streamlit Community Cloud (free)
 
 This folder is set up to deploy to **Streamlit Community Cloud** (free tier:
-~1 GB RAM, 1 CPU, no GPU). The app used for the cloud is **`cloud_app.py`** — it
-combines `app.py`'s **live WebRTC feed** with cloud-friendly fallbacks.
+~1 GB RAM, 1 CPU, no GPU). The app used for the cloud is **`cloud_app.py`** — a
+live camera feed plus cloud-friendly upload/photo inputs, and your trained model.
 
 On the cloud you get:
-- **Live WebRTC camera feed** (like `app.py`) — browser camera -> YOLO ->
-  annotated. NOTE: WebRTC on Community Cloud needs a TURN relay, so this can be
-  slow or flaky; if it won't connect, use the on-demand capture below.
+- **Live camera feed** — via `streamlit-camera-input-live`, which streams your
+  browser webcam as frames WITHOUT WebRTC (so no TURN relay is needed and it
+  works reliably on the free cloud). A few frames/sec on CPU.
 - **On-demand photo capture** (`st.camera_input`) — always works, no live stream.
 - **Image upload** — draw seat boxes, detect heads inside them.
 - **Video upload** — short clips, per-frame counting.
@@ -20,12 +20,14 @@ On the cloud you get:
 
 | File | Purpose |
 |------|---------|
-| `cloud_app.py` | Cloud entry point (live WebRTC feed + on-demand capture + uploads) |
-| `requirements.txt` | Cloud-safe deps (opencv-headless + streamlit-webrtc/av for live feed) |
+| `cloud_app.py` | Cloud entry point (live camera + on-demand capture + uploads) |
+| `requirements.txt` | Cloud-safe deps (opencv-headless + camera-input-live for live feed) |
 | `models/tuned/class-monitor-ai.pt` | Your trained model, committed so it runs on the cloud |
 | `.streamlit/config.toml` | Cloud-friendly Streamlit config |
 
-`app.py` (local WebRTC live stream) remains for local use.
+`app.py` (local WebRTC live stream) remains for local use only — WebRTC does not
+work reliably on the free Streamlit Cloud (needs a paid TURN relay), so the cloud
+app uses `camera-input-live` instead.
 
 ## Step-by-step deploy
 
@@ -61,9 +63,9 @@ On the cloud you get:
   CPU.
 - The default person model is `yolo11n-pose` (small, fast). On uploads you can
   switch models in the sidebar (including your trained `class-monitor-ai`).
-- The **live WebRTC feed** may fail on the free cloud because it needs a TURN
-  relay. If it hangs, press STOP and use the on-demand camera capture below it —
-  that works reliably.
+- The **live camera** runs YOLO on every frame, so it updates at a low FPS on
+  the free cloud (CPU-only). Tick "Start live detection" and allow camera access;
+  untick to stop. For a faster single check, use the on-demand photo capture.
 - First load downloads weights + warms up models, so the first request is slow;
   later ones are faster.
 - If the app shows "Error: No module named ...", confirm `requirements.txt` is

@@ -654,7 +654,8 @@ if up_vid is not None:
                 if not _HAVE_AV:
                     raise RuntimeError("PyAV not available - add `av` to requirements.")
                 with av.open(tmp_out_name, mode="w") as container:
-                    stream = container.add_stream("libx264", rate=fps)
+                    stream = container.add_stream("libx264",
+                                                  rate=int(round(float(fps))))
                     stream.width = out_w
                     stream.height = out_h
                     stream.pix_fmt = "yuv420p"

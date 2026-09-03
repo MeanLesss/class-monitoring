@@ -11,8 +11,9 @@
 # `opencv-python-headless` and needs NO graphics system libraries, so it runs
 # cleanly on the free cloud tier (CPU-only, ~1GB RAM).
 #
-# If you also run the local WebRTC app (app.py, live streaming), install the
-# extras separately:  pip install streamlit-webrtc av
+# streamlit-webrtc + av (below) enable the live WebRTC feed on the cloud too,
+# but WebRTC may be unreliable there (needs a TURN relay) - the photo / upload
+# paths in cloud_app.py always work regardless.
 
 # Official ultralytics headless build (imports the same `ultralytics` package
 # but requires opencv-python-headless).
@@ -22,3 +23,8 @@ numpy>=1.24
 pandas>=2.0
 matplotlib>=3.7
 streamlit>=1.61
+
+# Live WebRTC feed (cloud_app.py has a guarded fallback: if these fail to
+# install, the photo / upload paths still work).
+streamlit-webrtc>=0.47.0
+av>=11.0.0

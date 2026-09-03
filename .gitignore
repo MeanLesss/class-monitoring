@@ -12,8 +12,9 @@ venv/
 runs/
 models/training/
 
-# Weights (regenerable: pretrained download automatically, tuned is trained)
+# Weights: pretrained download automatically; keep ONLY the committed tuned model
 *.pt
+!models/tuned/class-monitor-ai.pt
 !models/tuned/*.meta.json
 
 # Annotated previews / caches (regenerable from the app)

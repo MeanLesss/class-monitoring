@@ -2,19 +2,19 @@
 Classroom Occupancy - Streamlit Community Cloud edition.
 
 Same detection pipeline as app.py (YOLO pose -> head/upper-body boxes, chairs
-detected as the seat area), but WITHOUT live WebRTC streaming:
-
-  * streamlit-webrtc needs a TURN relay and P2P that unreliable on the free
-    Streamlit Community Cloud, so live streaming is replaced by on-demand
-    photo capture via st.camera_input.
-  * Everything else (upload an image, upload a video, draw seat boxes) works
-    exactly as before and runs fine on the cloud's ~1GB / 1 CPU free tier.
-
-Detection logic:
+detected as the seat area). Detection logic:
 - A POSE model finds each person and, from the face keypoints (nose/eyes/ears),
   builds a HEAD box and an UPPER-BODY box (no full-body box).
 - Chairs (COCO class 56) are detected with a light detect model every ~2 s.
 - A person counts as OCCUPIED only if their HEAD center is inside the seat area.
+
+Input options (combined from app.py + cloud-friendly fallbacks):
+1. LIVE streaming via streamlit-webrtc (like app.py). NOTE: webRTC P2P media on
+   Streamlit Community Cloud needs a TURN relay; we ship a free STUN + an
+   Open-Relay TURN fallback. It may be slow/flaky on the free tier - if the live
+   feed fails to connect, use the on-demand camera capture or uploads instead.
+2. On-demand camera capture via st.camera_input (always works on the cloud).
+3. Uploaded image / video (always works on the cloud).
 
 Local run (from this folder):
     .\\ai-venv\\Scripts\\streamlit run cloud_app.py
@@ -38,6 +38,38 @@ from PIL import Image
 from seatdraw import seatdraw
 
 from ultralytics import YOLO
+
+# WebRTC live streaming (same as app.py). Optional: if the deps aren't
+# installed, the app still runs (photo / upload paths) and just hides the
+# live section.
+try:
+    import av
+    from streamlit_webrtc import VideoProcessorBase, WebRtcMode, webrtc_streamer
+    import streamlit_webrtc.component as _swc_component
+
+    # streamlit-webrtc compat patch (same as app.py): ignore the KeyError race
+    # on the internal on_change callback when the frontend value isn't ready.
+    _swc_orig_cb = _swc_component._make_state_change_callback
+
+    def _swc_safe_callback(key, frontend_key, user_on_change):
+        cb = _swc_orig_cb(key, frontend_key, user_on_change)
+
+        def safe():
+            try:
+                cb()
+            except KeyError:
+                pass
+
+        return safe
+
+    _swc_component._make_state_change_callback = _swc_safe_callback
+    _HAVE_WEBRTC = True
+except Exception:  # pragma: no cover - WebRTC deps are optional on the cloud
+    av = None
+    webrtc_streamer = None
+    WebRtcMode = None
+    VideoProcessorBase = None
+    _HAVE_WEBRTC = False
 
 # --------------------------------------------------------------------------
 # Model paths. On the cloud the pretrained weights are NOT stored in git, so
@@ -496,7 +528,162 @@ def _render_analyze(img_bgr, key_tag, prefilled=None):
 
 
 # --------------------------------------------------------------------------
-# 1. On-demand camera capture (replaces the cloud-unfriendly live WebRTC stream)
+# 1. LIVE streaming (streamlit-webrtc) - same feed as app.py
+# --------------------------------------------------------------------------
+st.divider()
+st.subheader("Live camera feed")
+st.caption("Same live feed as the local app: browser camera -> YOLO -> annotated. "
+           "On the free Streamlit Cloud, WebRTC needs a TURN relay, so this may be "
+           "slow or fail to connect - if it does, use the on-demand capture below.")
+
+live_manual_rois = list(st.session_state.get("seat_boxes", []))
+live_box_wh = st.session_state.get("seat_boxes_wh")
+live_prompt_hits = seat_hits
+
+
+class OccupancyProcessor(VideoProcessorBase):
+    MIN_INTERVAL = 0.10           # reap at most ~10 fps on the slow cloud CPU
+    CHAIR_EVERY = 2.0
+
+    def __init__(self):
+        self.fps = 0.0
+        self._prev = time.time()
+        self._last_process = 0.0
+        self._last_chair = 0.0
+        self._last_prompt = 0.0
+        self._last_annotated = None
+        self.auto_roi = None
+        self.rois = []
+        self.zone_chrome = True
+        self.total_seats = 0
+        self._furn_counts = []
+        self._furn = ([], [], [])
+        self._prompt_boxes = []
+
+    def _update_chair_area(self, chairs, desks, tvs):
+        if live_manual_rois:
+            return
+        all_boxes = list(chairs) + list(desks) + list(tvs)
+        if not all_boxes:
+            return
+        arr = np.array(all_boxes)
+        x1 = max(0, int(arr[:, 0].min())); y1 = max(0, int(arr[:, 1].min()))
+        x2 = int(arr[:, 2].max()); y2 = int(arr[:, 3].max())
+        m = max(8, int(0.02 * (x2 - x1)))
+        cur = (max(0, x1 - m), max(0, y1 - m), x2 + m, y2 + m)
+        if self.auto_roi is None:
+            self.auto_roi = cur
+        else:
+            a = 0.35
+            self.auto_roi = tuple(int(a * n + (1 - a) * o)
+                                  for n, o in zip(cur, self.auto_roi))
+        self._furn_counts.append(max(len(chairs), len(desks), len(tvs)))
+        self._furn_counts = self._furn_counts[-20:]
+        if seats == 0:
+            self.total_seats = int(np.median(self._furn_counts))
+
+    def _detect_furniture(self, img):
+        chairs, desks, tvs, _, _, _ = _furniture_area(img)
+        self._furn = (chairs, desks, tvs)
+        self._update_chair_area(chairs, desks, tvs)
+
+    def recv(self, frame):
+        now = time.time()
+        if now - self._last_process < self.MIN_INTERVAL:
+            if self._last_annotated is not None:
+                return av.VideoFrame.from_ndarray(self._last_annotated, format="bgr24")
+            return frame
+        try:
+            with _INFER_LOCK:
+                return self._process(frame, now)
+        except Exception:
+            traceback.print_exc()
+            return frame
+
+    def _process(self, frame, now):
+        img = frame.to_ndarray(format="bgr24")
+        h, w = img.shape[:2]
+        if live_prompt_hits and now - self._last_prompt > self.CHAIR_EVERY:
+            self._last_prompt = now
+            self._prompt_boxes = detect_prompt_seats(img, max(0.2, conf - 0.1), 640)
+        if now - self._last_chair > self.CHAIR_EVERY:
+            self._last_chair = now
+            self._detect_furniture(img)
+
+        results = _get_person()(img, conf=conf, imgsz=imgsz,
+                                device="cpu", verbose=False)[0]
+        if live_manual_rois:
+            if live_box_wh and (w, h) != tuple(live_box_wh):
+                sw, sh = w / live_box_wh[0], h / live_box_wh[1]
+                self.rois = [(int(x1 * sw), int(y1 * sh), int(x2 * sw), int(y2 * sh))
+                             for (x1, y1, x2, y2) in live_manual_rois]
+            else:
+                self.rois = list(live_manual_rois)
+            self.zone_chrome = True
+            if seats == 0:
+                self.total_seats = len(live_manual_rois)
+        elif self._prompt_boxes:
+            self.rois = [tuple(map(int, b)) for b, _, _ in self._prompt_boxes]
+            self.zone_chrome = False
+            if seats == 0:
+                self.total_seats = len(self.rois)
+        elif self.auto_roi is not None:
+            self.rois = [self.auto_roi]
+            self.zone_chrome = True
+        else:
+            self.rois = []
+            self.zone_chrome = False
+
+        occupied = _draw_people(img, results, self.rois, conf)
+        _draw_furniture(img, *self._furn)
+        _draw_prompt_seats(img, self._prompt_boxes)
+        if self.zone_chrome:
+            _draw_chair_area(img, self.rois, self.total_seats)
+        if not self.rois:
+            cv2.putText(img, "NO SEAT OBJECTS FOUND", (10, 50),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        now = time.time()
+        self.fps = 0.9 * self.fps + 0.1 * (1.0 / max(1e-6, now - self._prev))
+        self._prev = now
+        _draw_status(img, self.total_seats, occupied, self.fps)
+
+        self._last_process = now
+        self._last_annotated = img
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+
+if _HAVE_WEBRTC:
+    _TURN = {
+        "urls": "turn:openrelay.metered.ca:80",
+        "username": "openrelayproject",
+        "credential": "openrelayproject",
+    }
+    ctx = webrtc_streamer(
+        key="classroom-occupancy",
+        mode=WebRtcMode.SENDRECV,
+        rtc_configuration={
+            "iceServers": [
+                {"urls": ["stun:stun.l.google.com:19302"]},
+                _TURN,
+            ]
+        },
+        media_stream_constraints={"video": True, "audio": False},
+        video_processor_factory=OccupancyProcessor,
+    )
+    if not ctx.state.playing:
+        st.info("Press **START** and allow camera access. Live via WebRTC - if it "
+                "hangs on the cloud, use the on-demand snapshots below instead.")
+    else:
+        st.success("Live counting... point the camera at the classroom chairs.")
+else:
+    st.warning("Live WebRTC is disabled because `streamlit-webrtc` / `av` are not "
+               "installed in this deployment. Use the on-demand capture / uploads "
+               "below, or add streamlit-webrtc + av to requirements.txt.")
+
+
+# --------------------------------------------------------------------------
+# 2. On-demand camera capture (cloud-friendly fallback - always works)
 # --------------------------------------------------------------------------
 st.header("Capture a live photo")
 st.caption("Click below, the app asks for camera access, then press Run detection "
@@ -513,7 +700,7 @@ if _live_photo is not None:
 
 
 # --------------------------------------------------------------------------
-# 2. Image upload (test with a static photo)
+# 3. Image upload (test with a static photo)
 # --------------------------------------------------------------------------
 st.divider()
 st.subheader("Test with an uploaded image")
@@ -531,7 +718,7 @@ if up is not None:
 
 
 # --------------------------------------------------------------------------
-# 3. Video upload (test with a recorded clip: MP4 / MOV)
+# 4. Video upload (test with a recorded clip: MP4 / MOV)
 # --------------------------------------------------------------------------
 st.divider()
 st.subheader("Test with an uploaded video")
@@ -612,7 +799,7 @@ if up_vid is not None:
 
 
 # --------------------------------------------------------------------------
-# 4. Draw seat-area boxes that apply to the camera capture (cloud equivalent of
+# 5. Draw seat-area boxes that apply to the camera capture (cloud equivalent of
 #    the live seat-box drawing)
 # --------------------------------------------------------------------------
 st.divider()

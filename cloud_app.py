@@ -585,9 +585,9 @@ if up is not None:
 # --------------------------------------------------------------------------
 st.divider()
 st.subheader("Test with an uploaded video")
-st.caption("MP4 / MOV / AVI. **Play video** just watches the clip in the browser "
-           "(no detection). **Run detection on video** sends every frame through "
-           "the pipeline. Keep clips short on the free cloud.")
+st.caption("MP4 / MOV / AVI. **Play original** just watches the clip in the "
+           "browser (no detection). **Watch with detection** plays it frame-by-frame "
+           "with YOLO boxes/bounding and live occupied count.")
 
 up_vid = st.file_uploader("Upload a classroom video",
                           type=["mp4", "mov", "avi", "m4v"])
@@ -615,19 +615,24 @@ if up_vid is not None:
         st.write(f"**{os.path.basename(up_vid.name)}** - {vw}x{vh}, "
                  f"{total_frames} frames @ {fps:.0f} fps ({dur:.0f}s)")
 
-        play = st.button("&#9654; Play video (no detection - just watch)")
-        if play:
+        play_raw = st.button("&#9654; Play original (no detection)")
+        if play_raw:
             up_vid.seek(0)
             st.video(up_vid.read())
 
-        secs = st.number_input("Seconds to process (0 = whole video)", 0, 600, 30,
-                               help="Long videos take long to analyze - start with 30 s.")
-        if st.button("Run detection on video"):
+        secs = st.number_input("Seconds to watch (0 = whole video)", 0, 600, 30,
+                               help="Longer = more frames through YOLO, so slower.")
+        watch = st.button("&#9654; Watch with detection")
+
+        if watch:
             max_frames = int(fps * secs) if secs else total_frames
             vscale = 1280 / vw if vw > 1280 else 1.0
-            ph = st.empty()
-            bar = st.progress(0.0, text="Processing...")
-            m1, m2, m3, m4 = st.columns(4)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            st.markdown("**Watching with detection** - press Rerun / Stop to stop.")
+            live_ph = st.empty()
+            c1m, c2m = st.columns(2)
+            live_occ = c1m.empty()
+            bar = st.progress(0.0, text="Playing...")
             occs, seat_final, i = [], 0, 0
             results_out = {}
             try:
@@ -641,10 +646,11 @@ if up_vid is not None:
                         frame, conf, seats, imgsz, manual_rois=None,
                         results_out=results_out)
                     occs.append(occupied)
-                    ph.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
-                             caption=f"frame {i + 1}/{max_frames} | SEATS {seat_final}"
-                                     f" OCCUPIED {occupied}",
-                             width="stretch")
+                    live_occ.metric("Occupied right now", occupied)
+                    live_ph.image(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB),
+                                  caption=f"frame {i + 1}/{max_frames} | SEATS {seat_final}"
+                                          f" OCCUPIED {occupied}",
+                                  width="stretch")
                     bar.progress(min(1.0, (i + 1) / max(1, max_frames)),
                                  text=f"frame {i + 1}/{max_frames}")
                     annotated = None
@@ -659,10 +665,13 @@ if up_vid is not None:
                 cap.release()
 
             bar.progress(1.0, text="Done.")
-            m1.metric("Frames analyzed", len(occs))
-            m2.metric("Seats", seat_final)
-            m3.metric("Avg occupied", round(sum(occs) / len(occs), 1) if occs else 0)
-            m4.metric("Peak occupied", max(occs) if occs else 0)
+            if occs:
+                st.subheader("Summary")
+                m1, m2, m3, m4 = st.columns(4)
+                m1.metric("Frames watched", len(occs))
+                m2.metric("Seats", seat_final)
+                m3.metric("Avg occupied", round(sum(occs) / len(occs), 1))
+                m4.metric("Peak occupied", max(occs))
             os.unlink(tmp_in.name)
 
 
